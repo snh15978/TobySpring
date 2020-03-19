@@ -21,10 +21,18 @@ public class DaoFactory {
 
         return dataSource;
     }
+
+//    @Bean
+//    public JdbcContext jdbcContext(){
+//        JdbcContext jdbcContext = new JdbcContext();
+//        jdbcContext.setDataSource(dataSource());
+//        return jdbcContext;
+//    }
     @Bean
     public UserDao userDao(){
         UserDao userDao = new UserDao();
         userDao.setDataSource(dataSource());
+        //userDao.setJdbcContext(jdbcContext());
         return userDao;
     }
 
