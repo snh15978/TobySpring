@@ -37,6 +37,13 @@ public class DaoFactory {
     }
 
     @Bean
+    public UserService userService(){
+        UserService userService = new UserService();
+
+        userService.setUserDao(userDao());
+        return userService;
+    }
+    @Bean
     public ConnectionMaker connectionMaker(){
         return new DConnectionMaker();
     }
