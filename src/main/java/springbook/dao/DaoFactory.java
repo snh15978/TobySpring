@@ -3,7 +3,10 @@ package springbook.dao;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.SimpleDriverDataSource;
+import org.springframework.mail.javamail.JavaMailSenderImpl;
+import springbook.service.UserService;
 
 import javax.sql.DataSource;
 
@@ -41,7 +44,23 @@ public class DaoFactory {
         UserService userService = new UserService();
 
         userService.setUserDao(userDao());
+        userService.setTransactionManager(transactionManager());
+        userService.setMailSender(mailSender());
         return userService;
+    }
+
+    @Bean
+    public DataSourceTransactionManager transactionManager(){
+        DataSourceTransactionManager transactionManager = new DataSourceTransactionManager();
+        transactionManager.setDataSource(dataSource());
+        return transactionManager;
+    }
+
+    @Bean
+    public JavaMailSenderImpl mailSender(){
+        JavaMailSenderImpl mailSender = new JavaMailSenderImpl();
+        mailSender.setHost("mail.gmail.com");
+        return mailSender;
     }
     @Bean
     public ConnectionMaker connectionMaker(){
