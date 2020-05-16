@@ -3,7 +3,10 @@ package springbook.service;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.ArgumentCaptor;
+import org.springframework.aop.framework.ProxyFactoryBean;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationContext;
 import org.springframework.mail.MailException;
 import org.springframework.mail.MailSender;
 import org.springframework.mail.SimpleMailMessage;
@@ -16,20 +19,27 @@ import springbook.dao.UserDao;
 import springbook.domain.Level;
 import springbook.domain.User;
 
+import javax.sql.DataSource;
+import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.core.Is.is;
-import static org.hamcrest.core.IsNull.notNullValue;
 import static org.junit.Assert.fail;
-import static springbook.service.UserService.MIN_LOGCOUNT_FOR_SILVER;
-import static springbook.service.UserService.MIN_RECOMMEND_FOR_GOLD;
+import static org.mockito.Mockito.*;
+import static springbook.service.UserServiceImpl.MIN_LOGCOUNT_FOR_SILVER;
+import static springbook.service.UserServiceImpl.MIN_RECOMMEND_FOR_GOLD;
 
 @RunWith(SpringJUnit4ClassRunner.class)
 @ContextConfiguration(classes = DaoFactory.class)
 public class UserServiceTest {
+
+    List<User> users;
+
+    @Autowired
+    ApplicationContext context;
 
     @Autowired
     private UserDao userDao;
@@ -43,7 +53,8 @@ public class UserServiceTest {
     @Autowired
     MailSender mailSender;
 
-    List<User> users;
+    @Autowired
+    UserServiceImpl userServiceImpl;
 
     @Before
     public void setUp(){
@@ -56,28 +67,37 @@ public class UserServiceTest {
         );
     }
     @Test
-    @DirtiesContext
-    public void upgradeLevels() throws Exception {
-        userDao.deleteAll();
+    public void upgradeLevels() {
+        UserServiceImpl userServiceImpl = new UserServiceImpl();
 
-        for(User user : users) userDao.add(user);
+        UserDao mockUserDao = mock(UserDao.class);
+        when(mockUserDao.getAll()).thenReturn(this.users);
+        userServiceImpl.setUserDao(mockUserDao);
 
-        MockMailSender mockMailSender = new MockMailSender();
-        userService.setMailSender(mockMailSender);
+        MailSender mockMailSender = mock(MailSender.class);
+        userServiceImpl.setMailSender(mockMailSender);
 
-        userService.upgradeLevels();
+        userServiceImpl.upgradeLevels();
 
-        checkLevelUpgraded(users.get(0), false);
-        checkLevelUpgraded(users.get(1), true);
-        checkLevelUpgraded(users.get(2), false);
-        checkLevelUpgraded(users.get(3), true);
-        checkLevelUpgraded(users.get(4), false);
+        verify(mockUserDao, times(2)).update(any(User.class));
+        verify(mockUserDao, times(2)).update(any(User.class));
+        verify(mockUserDao).update(users.get(1));
+        assertThat(users.get(1).getLevel(),is(Level.SILVER));
+        verify(mockUserDao).update(users.get(3));
+        assertThat(users.get(3).getLevel(),is(Level.GOLD));
 
-//        List<String> request = mockMailSender.getRequests();
-//
-//        assertThat(request.size(), is(2));
-//        assertThat(request.get(0), is(users.get(1).getEmail()));
-//        assertThat(request.get(1), is(users.get(3).getEmail()));
+        ArgumentCaptor<SimpleMailMessage> mailMessageArg =
+                ArgumentCaptor.forClass(SimpleMailMessage.class);
+        verify(mockMailSender, times(2)).send(mailMessageArg.capture());
+        List<SimpleMailMessage> mailMessages = mailMessageArg.getAllValues();
+        assertThat(mailMessages.get(0).getTo()[0], is(users.get(1).getEmail()));
+        assertThat(mailMessages.get(1).getTo()[0], is(users.get(3).getEmail()));
+
+    }
+
+    private void checkUserAndLevel(User updated, String expectedId, Level expectedLevel) {
+        assertThat(updated.getId(), is(expectedId));
+        assertThat(updated.getLevel(), is(expectedLevel));
     }
 
     private void checkLevelUpgraded(User user, boolean upgraded) {
@@ -115,26 +135,41 @@ public class UserServiceTest {
     }
 
     @Test
+    @DirtiesContext
     public void upgradeAllOrNothing() throws Exception {
-        UserService testUserService = new TestUserService(users.get(3).getId());
+        TestUserService testUserService = new TestUserService(users.get(3).getId());
         testUserService.setUserDao(this.userDao);
-        testUserService.setTransactionManager(this.transactionManager);
         testUserService.setMailSender(this.mailSender);
+
+//        UserServiceTx txUserService = new UserServiceTx();
+//        txUserService.setTransactionManager(this.transactionManager);
+//        txUserService.setUserService(testUserService);
+
+//        TransactionHandler txHandler = new TransactionHandler();
+//        txHandler.setTarget(testUserService);
+//        txHandler.setTransactionManager(this.transactionManager);
+//        txHandler.setPattern("upgradeLevels");
+
+        ProxyFactoryBean txProxyFactoryBean =
+                context.getBean("&userService", ProxyFactoryBean.class);
+        txProxyFactoryBean.setTarget(testUserService);
+
+        UserService txUserService = (UserService)txProxyFactoryBean.getObject();
 
         userDao.deleteAll();
 
         for(User user : users) userDao.add(user);
 
         try{
-            testUserService.upgradeLevels();
+            txUserService.upgradeLevels();
             fail("TestUserServiceException expected");
         } catch (TestUserServiceException e){
 
         }
-        checkLevelUpgraded(users.get(1), false);;
+        checkLevelUpgraded(users.get(1), false);
     }
 
-    static class TestUserService extends UserService {
+    static class TestUserService extends UserServiceImpl {
 
         private String id;
 
@@ -168,4 +203,52 @@ public class UserServiceTest {
 
         }
     }
+
+    static class MockUserDao implements UserDao {
+        private List<User> users;
+        private List<User> updated = new ArrayList();
+
+        public MockUserDao(List<User> users) {
+            this.users = users;
+        }
+
+        public List<User> getUpdated(){
+            return this.updated;
+        }
+        @Override
+        public void add(User user) {
+
+        }
+
+        @Override
+        public User get(String id) {
+            return null;
+        }
+
+        @Override
+        public List<User> getAll() {
+            return this.users;
+        }
+
+        @Override
+        public void deleteAll() {
+
+        }
+
+        @Override
+        public int getCount() {
+            return 0;
+        }
+
+        @Override
+        public void setDataSource(DataSource dataSource) {
+
+        }
+
+        @Override
+        public void update(User user) {
+            updated.add(user);
+        }
+    }
+
 }

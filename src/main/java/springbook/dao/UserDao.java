@@ -14,5 +14,5 @@ public interface UserDao {
 
     void setDataSource(DataSource dataSource);
 
-    void update(User user1);
+    void update(User user);
 }
